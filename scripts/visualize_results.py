@@ -7,6 +7,7 @@ import re
 from Bio import Phylo
 import matplotlib.patches as mpatches
 import math
+import os
 
 def generate_plots(df, output_prefix):
     mask = np.triu(np.ones_like(df, dtype=bool), k=1)
@@ -74,10 +75,10 @@ def get_lineage_colors(tree, meta_df):
 
 def get_legend_labels():
     return {
-        "DENV-1": "DENV-1 (Ref: NC_001477.1)",
-        "DENV-2": "DENV-2 (Ref: NC_001474.2)",
-        "DENV-3": "DENV-3 (Ref: NC_001475.3)",
-        "DENV-4": "DENV-4 (Ref: NC_002640.4)",
+        "DENV-1": "DENV-1",
+        "DENV-2": "DENV-2",
+        "DENV-3": "DENV-3",
+        "DENV-4": "DENV-4",
         "Unknown": "Unknown"
     }
 
@@ -316,22 +317,123 @@ def generate_phylo_trees(tree_file, meta_df, output_prefix):
     plot_unrooted_tree(tree, lineage_map, color_map, unique_clades, f"{output_prefix}_unrooted.png")
     plot_circular_tree(tree, lineage_map, color_map, unique_clades, f"{output_prefix}_circular.png")
 
+def generate_serotype_trees(tree_files, meta_df):
+    serotype_colors = {
+        "DENV1": ("#4C78A8", "DENV-1"),
+        "DENV2": ("#59A14F", "DENV-2"),
+        "DENV3": ("#EDC948", "DENV-3"),
+        "DENV4": ("#F28E2B", "DENV-4"),
+    }
+
+    for tree_file in tree_files:
+        basename = os.path.basename(tree_file).replace('.nwk', '')
+        serotype_key = basename
+        color, serotype_label = serotype_colors.get(serotype_key, ("gray", basename))
+
+        try:
+            tree = Phylo.read(tree_file, "newick")
+        except Exception as e:
+            print(f"Error reading {tree_file}: {e}")
+            continue
+
+        tree.root_at_midpoint()
+        tree.ladderize()
+
+        sample_lineage = {}
+        for _, row in meta_df.iterrows():
+            sid = row['sample_id']
+            conclusion = str(row.get('conclusion', ''))
+            lineage = "Sample"
+            if "Reference" in conclusion:
+                lineage = "Reference"
+            elif "Lineage" in conclusion:
+                import re as _re
+                m = _re.search(r'Lineage:\s*(.+?)\.?\s*Confidence', conclusion)
+                if m:
+                    lineage = m.group(1).strip()
+            sample_lineage[sid] = lineage
+
+        terminal_names = [c.name for c in tree.get_terminals()]
+        lineages_in_tree = set()
+        for name in terminal_names:
+            lineages_in_tree.add(sample_lineage.get(name, "Unknown"))
+        unique_lineages = sorted(lineages_in_tree)
+
+        base_palette = plt.cm.tab10.colors
+        lineage_color_map = {}
+        for i, lin in enumerate(unique_lineages):
+            if lin == "Reference":
+                lineage_color_map[lin] = "#E15759"
+            else:
+                lineage_color_map[lin] = base_palette[i % len(base_palette)]
+
+        lineage_map = {}
+        for clade in tree.get_terminals():
+            lineage_map[clade.name] = sample_lineage.get(clade.name, "Unknown")
+
+        fig = plt.figure(figsize=(15, max(8, len(terminal_names) * 0.4)))
+        ax = fig.add_subplot(1, 1, 1)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.get_yaxis().set_visible(False)
+
+        for clade in tree.find_clades():
+            h = color.lstrip('#')
+            clade.color = tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+        def get_branch_label(clade):
+            if clade.branch_length and clade.branch_length > 0.0005:
+                return f"{clade.branch_length:.4f}"
+            return None
+
+        Phylo.draw(
+            tree, axes=ax, do_show=False, show_confidence=False,
+            label_func=lambda x: x.name if x.is_terminal() else "",
+            branch_labels=get_branch_label,
+        )
+
+        terminals = tree.get_terminals()
+        for i, clade in enumerate(terminals):
+            y_pos = i + 1
+            x_pos = tree.distance(tree.root, clade)
+            lin = lineage_map.get(clade.name, "Unknown")
+            c = lineage_color_map.get(lin, "gray")
+            ax.scatter(x_pos, y_pos, color=c, s=80, zorder=10,
+                       edgecolors='white', linewidth=0.5)
+
+        handles = [mpatches.Patch(color=lineage_color_map[l], label=l)
+                   for l in unique_lineages]
+        plt.legend(handles=handles, title="Lineage", loc='upper left',
+                   bbox_to_anchor=(1, 1), frameon=False)
+
+        plt.title(f"Phylogenetic Tree — {serotype_label}", fontsize=14)
+        plt.xlabel("Genetic Distance", fontsize=12)
+        plt.tight_layout()
+        plt.savefig(f"serotype_{serotype_key}_tree.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"Plotted {serotype_label} tree with {len(terminal_names)} tips")
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--matrix', required=True, help="Path to distance_matrix.tsv")
-    parser.add_argument('--metadata', required=True, help="Path to metadata.tsv")
-    parser.add_argument('--tree', required=False, help="Path to phylo_tree.nwk")
+    parser.add_argument('--matrix', required=False)
+    parser.add_argument('--metadata', required=True)
+    parser.add_argument('--tree', required=False)
+    parser.add_argument('--serotype_trees', nargs='*', required=False)
     args = parser.parse_args()
 
-    df = pd.read_csv(args.matrix, sep='\t', index_col=0)
-    df.index.name = "Sample"
-    
     meta_df = pd.read_csv(args.metadata, sep='\t')
 
-    generate_plots(df, "stats")
-    
+    if args.matrix:
+        df = pd.read_csv(args.matrix, sep='\t', index_col=0)
+        df.index.name = "Sample"
+        generate_plots(df, "stats")
+
     if args.tree:
         generate_phylo_trees(args.tree, meta_df, "phylo_tree")
+
+    if args.serotype_trees:
+        generate_serotype_trees(args.serotype_trees, meta_df)
 
 if __name__ == "__main__":
     main()
