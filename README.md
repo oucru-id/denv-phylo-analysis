@@ -1,4 +1,4 @@
-# DENV FHIR Phylogeny Analysis Pipeline
+# DENV FHIR Phylogeny Analysis Pipeline (Local)
 
 This pipeline processes FHIR bundle JSON files containing pan-serotype Dengue genomics data to generate distance matrices and phylogenetic trees. Full documentation on progress
 
@@ -6,7 +6,8 @@ This pipeline processes FHIR bundle JSON files containing pan-serotype Dengue ge
 ## Features
 
 - **Direct FHIR Genomics JSON input**
-- **Phylogenetic tree (Whole-Genome):** Rectangular, circular, and unrooted. 
+- **Full Pan-serotype Phylogenetic tree:** Rectangular, circular, and unrooted.
+- **Per serotype Phylogenetic tree** 
 - **Transmission network visualization:** Graph and statistical plots (heatmap, violin plot).
 - **Clinical metadata integration:** Extracted from Bundle Genomics FHIR.
 
@@ -22,7 +23,7 @@ This pipeline processes FHIR bundle JSON files containing pan-serotype Dengue ge
 
 Install Python dependencies:
 ```bash
-pip install biopython pandas networkx pyvis matplotlib seaborn
+pip install biopython pandas matplotlib seaborn
 ```
 
 ### Run the Pipeline
